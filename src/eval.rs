@@ -39,7 +39,7 @@ pub fn naive_eval(b: &Board) -> i16 {
         return 10000;
     }
     if b.defender_win {
-        return 10000;
+        return -10000;
     }
     if b.stalemate {
         return 0;
@@ -55,6 +55,5 @@ pub fn naive_eval(b: &Board) -> i16 {
     defender_score -= dist_to_corner;
     attack_score += attackers_next_to_king;
 
-    let sgn = if b.attacker_move { 1 } else { -1 };
-    return (attacker_weight * attack_score - defender_weight * defender_score) * sgn;
+    return attacker_weight * attack_score - defender_weight * defender_score;
 }

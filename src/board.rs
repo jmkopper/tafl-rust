@@ -71,6 +71,17 @@ pub struct Board {
     pub stalemate: bool,
 }
 
+pub const STARTING_BOARD: Board = Board {
+    attacker_board: 123437837206556,
+    defender_board: 7558594560,
+    king_board: 16777216,
+    offlimits_board: 285873039999041,
+    attacker_move: false,
+    attacker_win: false,
+    defender_win: false,
+    stalemate: false,
+};
+
 pub fn rc_to_index(row: u64, col: u64) -> u64 {
     row * BOARD_SIZE + col
 }
@@ -259,9 +270,6 @@ impl Board {
         } else {
             new_b = self.make_defender_move(m);
         }
-        // if new_b.legal_moves().len() == 0 {
-        //     new_b.stalemate = true;
-        // }
         return new_b;
     }
 
@@ -329,16 +337,4 @@ fn valid_capture(
     let ally_index = rc_to_index(ally_coords.0 as u64, ally_coords.1 as u64);
 
     return capturer_bitboard & (1 << ally_index) != 0;
-}
-
-pub fn bool_array_to_bitboard(arr: [[bool; BOARD_SIZE as usize]; BOARD_SIZE as usize]) -> Bitboard {
-    let mut b: Bitboard = 0;
-    for i in 0..BOARD_SIZE {
-        for j in 0..BOARD_SIZE {
-            if arr[i as usize][j as usize] {
-                b |= 1 << rc_to_index(i, j);
-            }
-        }
-    }
-    return b;
 }
