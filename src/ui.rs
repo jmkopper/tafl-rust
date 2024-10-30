@@ -61,12 +61,13 @@ impl UI for ConsoleUI {
     }
 
     fn render_eval(&self, benchmark: &EngineBenchmark) {
-        println!("Recommended Move: {}", benchmark.recommendation.best_move.to_string());
+        println!(
+            "Recommended Move: {}",
+            benchmark.recommendation.best_move.to_string()
+        );
         println!(
             "Evaluation: {} ({} nodes) ({:.2?})",
-            benchmark.recommendation.evaluation,
-            benchmark.recommendation.nnodes,
-            benchmark.elapsed
+            benchmark.recommendation.evaluation, benchmark.recommendation.nnodes, benchmark.elapsed
         );
     }
 

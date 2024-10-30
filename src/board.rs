@@ -2,7 +2,7 @@ pub const BOARD_SIZE: u64 = 7;
 pub const DIRS: [(isize, isize); 4] = [(0, 1), (0, -1), (1, 0), (-1, 0)];
 pub type Bitboard = u64;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Move {
     pub start_row: u64,
     pub start_col: u64,
@@ -134,7 +134,21 @@ impl Board {
         new_board.attacker_board &= !(1 << index);
         new_board.attacker_board |= 1 << new_index;
 
-        if new_board.king_captured() {
+        let (king_row, king_col) = self.king_coordinates();
+        let mut next_to_king = false;
+        for dir in DIRS.iter() {
+            let new_row = m.end_row as isize + dir.0;
+            let new_col = m.end_col as isize + dir.1;
+            if inbounds(new_row, new_col)
+                && new_row == king_row as isize
+                && new_col == king_col as isize
+            {
+                next_to_king = true;
+                break;
+            }
+        }
+
+        if new_board.king_captured() && next_to_king {
             new_board.attacker_win = true;
         }
 

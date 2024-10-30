@@ -118,12 +118,9 @@ fn init_board_2() -> board::Board {
 
 fn main() {
     let mut b = init_board();
-
-    let mut tafl_ai = engine::TaflAI {
-        max_depth: 6,
-    };
-
+    let mut tafl_ai = engine::TaflAI { max_depth: 7 };
     let mut console_ui = ui::ConsoleUI::new();
+
     loop {
         if b.defender_win {
             console_ui.defender_win();

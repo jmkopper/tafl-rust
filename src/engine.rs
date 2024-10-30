@@ -10,9 +10,9 @@ impl TaflAI {
     pub fn find_best_move(&mut self, b: &Board) -> EngineRecommendation {
         let mut nnodes = 0usize;
         if b.attacker_move {
-            return alphabeta_max(self, b, self.max_depth, &mut nnodes, i16::MIN, i16::MAX);
+            return alphabeta_max(b, self.max_depth, &mut nnodes, i16::MIN, i16::MAX);
         } else {
-            return alphabeta_min(self, b, self.max_depth, &mut nnodes, i16::MIN, i16::MAX);
+            return alphabeta_min(b, self.max_depth, &mut nnodes, i16::MIN, i16::MAX);
         }
     }
 }
@@ -29,7 +29,6 @@ pub struct EngineBenchmark {
 }
 
 fn alphabeta_max(
-    tafl_ai: &mut TaflAI,
     b: &Board,
     depth: u8,
     nnodes: &mut usize,
@@ -67,7 +66,7 @@ fn alphabeta_max(
 
     for m in MoveGenerator::new(b) {
         let new_board = b.make_move(m);
-        let rec_val = alphabeta_min(tafl_ai, &new_board, depth - 1, nnodes, alpha, beta);
+        let rec_val = alphabeta_min(&new_board, depth - 1, nnodes, alpha, beta);
 
         if rec_val.evaluation > max_eval {
             max_eval = rec_val.evaluation;
@@ -97,7 +96,6 @@ fn alphabeta_max(
 }
 
 fn alphabeta_min(
-    tafl_ai: &mut TaflAI,
     b: &Board,
     depth: u8,
     nnodes: &mut usize,
@@ -108,7 +106,7 @@ fn alphabeta_min(
 
     if depth == 0 {
         return EngineRecommendation {
-            evaluation: -naive_eval(&b),
+            evaluation: naive_eval(&b),
             best_move: NULL_MOVE,
             nnodes: *nnodes,
         };
@@ -135,7 +133,7 @@ fn alphabeta_min(
 
     for m in MoveGenerator::new(b) {
         let new_board = b.make_move(m);
-        let rec_val = alphabeta_max(tafl_ai, &new_board, depth - 1, nnodes, alpha, beta);
+        let rec_val = alphabeta_max(&new_board, depth - 1, nnodes, alpha, beta);
 
         if rec_val.evaluation < min_eval {
             min_eval = rec_val.evaluation;
@@ -162,4 +160,67 @@ fn alphabeta_min(
         best_move: best_move,
         nnodes: *nnodes,
     };
+}
+
+fn minimax(b: &Board, depth: u8, max_player: bool, nnodes: &mut usize) -> EngineRecommendation {
+    *nnodes += 1;
+    if depth == 0 {
+        return EngineRecommendation {
+            evaluation: naive_eval(&b),
+            best_move: NULL_MOVE,
+            nnodes: *nnodes,
+        };
+    }
+
+    if b.attacker_win {
+        return EngineRecommendation {
+            evaluation: 10000 + depth as i16,
+            best_move: NULL_MOVE,
+            nnodes: *nnodes,
+        };
+    }
+
+    if b.defender_win {
+        return EngineRecommendation {
+            evaluation: -10000 - depth as i16,
+            best_move: NULL_MOVE,
+            nnodes: *nnodes,
+        };
+    }
+    if max_player {
+        let mut max_eval = i16::MIN;
+        let mut best_move = NULL_MOVE;
+
+        for m in MoveGenerator::new(&b) {
+            let new_board = b.make_move(m);
+            let eval = minimax(&new_board, depth - 1, false, nnodes);
+            if eval.evaluation > max_eval {
+                max_eval = eval.evaluation;
+                best_move = m;
+            }
+        }
+        return EngineRecommendation {
+            evaluation: max_eval,
+            best_move: best_move,
+            nnodes: *nnodes,
+        };
+    } else {
+        let mut min_eval = i16::MAX;
+        let mut best_move = NULL_MOVE;
+
+        for m in MoveGenerator::new(&b) {
+            let new_board = b.make_move(m);
+            let eval = minimax(&new_board, depth - 1, true, nnodes);
+            if eval.evaluation < min_eval {
+                min_eval = eval.evaluation;
+                best_move = m;
+            }
+            min_eval = min_eval.min(eval.evaluation);
+        }
+        return EngineRecommendation {
+            evaluation: min_eval,
+            best_move: best_move,
+            nnodes: *nnodes,
+        };
+    }
 }
