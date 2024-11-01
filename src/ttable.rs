@@ -1,5 +1,5 @@
-use crate::board::{Board, BOARD_SIZE, NULL_MOVE};
-const TTABLE_SIZE: usize = 31973;
+use crate::board::{Board, BOARD_SIZE};
+const TTABLE_SIZE: usize = (1 << 16) - 1;
 const NUM_SQUARES: usize = (BOARD_SIZE * BOARD_SIZE) as usize;
 
 #[derive(PartialEq, Clone, Copy)]
@@ -7,12 +7,11 @@ pub enum Flag {
     EXACT,
     LOWERBOUND,
     UPPERBOUND,
-    INVALID,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct TranspositionTableEntry {
-    pub evaluation: f64,
+    pub evaluation: i16,
     pub depth: usize,
     pub key: usize,
 }
@@ -27,7 +26,7 @@ pub struct TranspositionTable {
 impl TranspositionTable {
     pub fn new() -> Self {
         let table = [TranspositionTableEntry {
-            evaluation: 0.0,
+            evaluation: 0,
             depth: 0,
             key: 0,
         }; TTABLE_SIZE];
@@ -45,14 +44,23 @@ impl TranspositionTable {
         return self.table[index].key == hash;
     }
 
-    pub fn retrieve(&self, b: &Board) -> &TranspositionTableEntry {
-        let index = zobrist_hash(b, self.attacker_bits, self.init_hash) % self.capacity;
-        return &self.table[index];
+    pub fn retrieve(&self, b: &Board) -> Option<&TranspositionTableEntry> {
+        let key = zobrist_hash(b, self.attacker_bits, self.init_hash);
+        let entry = &self.table[key % self.capacity];
+        if entry.key == key {
+            return Some(entry);
+        } else {
+            return None;
+        }
     }
 
-    pub fn store(&mut self, b: &Board, entry: TranspositionTableEntry) {
-        let index = zobrist_hash(b, self.attacker_bits, self.init_hash) % self.capacity;
-        self.table[index] = entry;
+    pub fn store(&mut self, b: &Board, evaluation: i16, depth: usize) {
+        let key = zobrist_hash(b, self.attacker_bits, self.init_hash);
+        self.table[key % self.capacity] = TranspositionTableEntry {
+            evaluation,
+            depth,
+            key,
+        };
     }
 }
 

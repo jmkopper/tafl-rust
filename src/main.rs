@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use board::STARTING_BOARD;
 use movegen::MoveGenerator;
 use ui::UI;
 
@@ -12,8 +11,11 @@ mod ttable;
 mod ui;
 
 fn main() {
-    let mut b = STARTING_BOARD;
-    let mut tafl_ai = engine::TaflAI { max_depth: 7 };
+    let mut b = board::STARTING_BOARD;
+    let mut tafl_ai = engine::TaflAI {
+        max_depth: 9,
+        ttable: ttable::TranspositionTable::new(),
+    };
     let mut console_ui = ui::ConsoleUI::new();
 
     loop {
