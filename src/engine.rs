@@ -45,14 +45,6 @@ fn alphabeta_max(
         };
     }
 
-    if b.attacker_win {
-        return EngineRecommendation {
-            evaluation: 10000 + depth as i16,
-            best_move: NULL_MOVE,
-            nnodes: *nnodes,
-        };
-    }
-
     if b.defender_win {
         return EngineRecommendation {
             evaluation: -10000 - depth as i16,
@@ -125,14 +117,6 @@ fn alphabeta_min(
     if b.attacker_win {
         return EngineRecommendation {
             evaluation: 10000 + depth as i16,
-            best_move: NULL_MOVE,
-            nnodes: *nnodes,
-        };
-    }
-
-    if b.defender_win {
-        return EngineRecommendation {
-            evaluation: -10000 - depth as i16,
             best_move: NULL_MOVE,
             nnodes: *nnodes,
         };
