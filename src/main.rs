@@ -16,6 +16,7 @@ fn main() {
         max_depth: 9,
         ttable: ttable::TranspositionTable::new(),
     };
+    b.current_hash = tafl_ai.ttable.hash_from_board(&b);
     let mut console_ui = ui::ConsoleUI::new();
 
     loop {
@@ -30,28 +31,28 @@ fn main() {
             break;
         }
 
-        console_ui.render_board(&b);
-
         let now = Instant::now();
-        let recommendation = tafl_ai.find_best_move(&b);
+        let mut b_for_eval = b.clone();
+        let recommendation = tafl_ai.find_best_move(&mut b_for_eval);
         let elapsed = now.elapsed();
         let benchmark = engine::EngineBenchmark {
             recommendation,
             elapsed,
         };
         console_ui.render_eval(&benchmark);
-
-        let mut mv = console_ui.get_move();
+        console_ui.render_board(&b);
+        let mut mv = console_ui.get_move(&b);
 
         let legal_moves = MoveGenerator::new(&b).collect::<Vec<_>>();
+
         if legal_moves.len() == 0 {
             console_ui.stalemate();
             break;
         }
         while !legal_moves.contains(&mv) {
             console_ui.invalid_move();
-            mv = console_ui.get_move();
+            mv = console_ui.get_move(&b);
         }
-        b = b.make_move(mv);
+        b.make_move(mv, &tafl_ai.ttable);
     }
 }

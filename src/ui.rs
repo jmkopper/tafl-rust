@@ -1,10 +1,10 @@
 use std::io::{Read, Write};
 
-use crate::board::{Board, Move};
+use crate::board::{rc_to_index, Board, Move, PieceType};
 use crate::engine::EngineBenchmark;
 
 pub trait UI {
-    fn get_move(&mut self) -> Move;
+    fn get_move(&mut self, b: &Board) -> Move;
     fn render_board(&self, b: &Board);
     fn render_eval(&self, benchmark: &EngineBenchmark);
     fn invalid_move(&self);
@@ -26,7 +26,7 @@ impl ConsoleUI {
 }
 
 impl UI for ConsoleUI {
-    fn get_move(&mut self) -> Move {
+    fn get_move(&mut self, b: &Board) -> Move {
         print!("Make a move: ");
         std::io::stdout().flush().unwrap();
         let mut buf = [0; 10];
@@ -38,20 +38,20 @@ impl UI for ConsoleUI {
                 for i in 0..n {
                     move_str.push(buf[i] as char);
                 }
-                let m = parse_move(&move_str);
+                let m = parse_move(&move_str, b.attacker_move);
                 match m {
                     Some(mv) => {
                         return mv;
                     }
                     None => {
-                        print!("Invalid Move!\n");
-                        return self.get_move();
+                        print!("Unable to parse move!\n");
+                        return self.get_move(b);
                     }
                 }
             }
             Err(_) => {
-                print!("Invalid Move!\n");
-                return self.get_move();
+                print!("Unable to parse move!\n");
+                return self.get_move(b);
             }
         }
     }
@@ -87,9 +87,9 @@ impl UI for ConsoleUI {
         println!("Stalemate!");
     }
 }
-fn validate_move_num(c: Option<char>, sub_val: u64) -> Option<u64> {
+fn validate_move_num(c: Option<char>, sub_val: usize) -> Option<usize> {
     c.and_then(|x| {
-        let value = x as u64;
+        let value = x as usize;
         if value >= sub_val {
             Some(value - sub_val)
         } else {
@@ -98,38 +98,43 @@ fn validate_move_num(c: Option<char>, sub_val: u64) -> Option<u64> {
     })
 }
 
-fn parse_num(c: &mut std::str::Chars, dir: char) -> Option<u64> {
+fn parse_num(c: &mut std::str::Chars, dir: char) -> Option<usize> {
     if let Some(ch) = c.next() {
-        validate_move_num(Some(ch), dir as u64)
+        validate_move_num(Some(ch), dir as usize)
     } else {
         None
     }
 }
 
-pub fn parse_move(s: &String) -> Option<Move> {
+pub fn parse_move(s: &String, attacker_move: bool) -> Option<Move> {
     let mut m = Move {
-        start_row: 0,
-        start_col: 0,
-        end_row: 0,
-        end_col: 0,
-        king_move: false,
+        start_index: 0,
+        end_index: 0,
+        piece_type: PieceType::Defender,
     };
 
     let mut c = s.chars();
     if c.clone().nth(0) == Some('k') {
-        m.king_move = true;
+        m.piece_type = PieceType::King;
         c.next(); // Consume 'k'
     }
 
-    if m.king_move {
-        m.end_col = parse_num(&mut c, 'a')?;
-        m.end_row = parse_num(&mut c, '1')?;
-    } else {
-        m.start_col = parse_num(&mut c, 'a')?;
-        m.start_row = parse_num(&mut c, '1')?;
-        m.end_col = parse_num(&mut c, 'a')?;
-        m.end_row = parse_num(&mut c, '1')?;
+    if attacker_move {
+        m.piece_type = PieceType::Attacker;
     }
+
+    let end_row: usize;
+    let end_col: usize;
+    let start_row: usize;
+    let start_col: usize;
+
+    start_col = parse_num(&mut c, 'a')?;
+    start_row = parse_num(&mut c, '1')?;
+    end_col = parse_num(&mut c, 'a')?;
+    end_row = parse_num(&mut c, '1')?;
+
+    m.start_index = rc_to_index(start_row, start_col);
+    m.end_index = rc_to_index(end_row, end_col);
 
     Some(m)
 }

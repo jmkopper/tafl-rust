@@ -13,7 +13,7 @@ fn attackers_next_to_king(b: &Board) -> i16 {
         if !inbounds(new_row, new_col) {
             continue;
         }
-        let new_index = rc_to_index(new_row as u64, new_col as u64);
+        let new_index = rc_to_index(new_row as usize, new_col as usize);
         if b.attacker_board & (1 << new_index) != 0 {
             s += 1;
         }

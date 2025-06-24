@@ -9,7 +9,7 @@ pub struct TaflAI {
 }
 
 impl TaflAI {
-    pub fn find_best_move(&mut self, b: &Board) -> EngineRecommendation {
+    pub fn find_best_move(&mut self, b: &mut Board) -> EngineRecommendation {
         return alphabeta_search(self, b, self.max_depth - 1);
     }
 }
@@ -25,7 +25,7 @@ pub struct EngineBenchmark {
     pub elapsed: std::time::Duration,
 }
 
-fn alphabeta_search(tafl_ai: &mut TaflAI, b: &Board, max_depth: u8) -> EngineRecommendation {
+fn alphabeta_search(tafl_ai: &mut TaflAI, b: &mut Board, max_depth: u8) -> EngineRecommendation {
     let mut nnodes = 1;
     let mut best_move = NULL_MOVE;
     let mut alpha = i16::MIN;
@@ -34,9 +34,11 @@ fn alphabeta_search(tafl_ai: &mut TaflAI, b: &Board, max_depth: u8) -> EngineRec
 
     if b.attacker_move {
         best_eval = i16::MIN;
-        for m in MoveGenerator::new(b) {
-            let new_board = b.make_move(m);
-            let rec_val = alphabeta_min(tafl_ai, &new_board, max_depth, &mut nnodes, alpha, beta);
+        let moves: Vec<Move> = MoveGenerator::new(b).collect();
+        for &m in moves.iter() {
+            b.make_move(m, &tafl_ai.ttable);
+            let rec_val = alphabeta_min(tafl_ai, b, max_depth, &mut nnodes, alpha, beta);
+            b.unmake_move(&tafl_ai.ttable);
             if rec_val > best_eval {
                 best_move = m;
                 best_eval = rec_val;
@@ -52,9 +54,11 @@ fn alphabeta_search(tafl_ai: &mut TaflAI, b: &Board, max_depth: u8) -> EngineRec
         }
     } else {
         best_eval = i16::MAX;
-        for m in MoveGenerator::new(b) {
-            let new_board = b.make_move(m);
-            let rec_val = alphabeta_max(tafl_ai, &new_board, max_depth, &mut nnodes, alpha, beta);
+        let moves: Vec<Move> = MoveGenerator::new(b).collect();
+        for &m in moves.iter() {
+            b.make_move(m, &tafl_ai.ttable);
+            let rec_val = alphabeta_max(tafl_ai, b, max_depth, &mut nnodes, alpha, beta);
+            b.unmake_move(&tafl_ai.ttable);
             if rec_val < best_eval {
                 best_move = m;
                 best_eval = rec_val;
@@ -78,7 +82,7 @@ fn alphabeta_search(tafl_ai: &mut TaflAI, b: &Board, max_depth: u8) -> EngineRec
 
 fn alphabeta_max(
     tafl_ai: &mut TaflAI,
-    b: &Board,
+    b: &mut Board,
     depth: u8,
     nnodes: &mut usize,
     mut alpha: i16,
@@ -94,19 +98,26 @@ fn alphabeta_max(
         return -10000 - depth as i16;
     }
 
+    if b.defender_win {
+        return 10000 + depth as i16;
+    }
+
     if let Some(entry) = tafl_ai.ttable.retrieve(b) {
-        if entry.depth >= depth as usize {
+        if entry.depth >= depth {
             return entry.evaluation;
         }
     }
 
     let mut max_eval = i16::MIN;
-    let mut move_count = 0;
+    let moves: Vec<Move> = MoveGenerator::new(b).collect();
+    if moves.is_empty() {
+        return 0;
+    }
 
-    for m in MoveGenerator::new(b) {
-        move_count += 1;
-        let new_board = b.make_move(m);
-        let rec_val = alphabeta_min(tafl_ai, &new_board, depth - 1, nnodes, alpha, beta);
+    for &m in moves.iter() {
+        b.make_move(m, &tafl_ai.ttable);
+        let rec_val = alphabeta_min(tafl_ai, b, depth - 1, nnodes, alpha, beta);
+        b.unmake_move(&tafl_ai.ttable);
 
         if rec_val > max_eval {
             max_eval = rec_val;
@@ -116,22 +127,18 @@ fn alphabeta_max(
         }
 
         if rec_val >= beta {
-            tafl_ai.ttable.store(b, max_eval, depth as usize);
+            tafl_ai.ttable.store(b, max_eval, depth);
             return rec_val;
         }
     }
 
-    if move_count == 0 {
-        return 0;
-    }
-
-    tafl_ai.ttable.store(b, max_eval, depth as usize);
+    tafl_ai.ttable.store(b, max_eval, depth);
     return max_eval;
 }
 
 fn alphabeta_min(
     tafl_ai: &mut TaflAI,
-    b: &Board,
+    b: &mut Board,
     depth: u8,
     nnodes: &mut usize,
     alpha: i16,
@@ -147,19 +154,25 @@ fn alphabeta_min(
         return 10000 + depth as i16;
     }
 
+    if b.defender_win {
+        return -10000 - depth as i16;
+    }
+
     if let Some(entry) = tafl_ai.ttable.retrieve(b) {
-        if entry.depth >= depth as usize {
+        if entry.depth >= depth {
             return entry.evaluation;
         }
     }
 
     let mut min_eval = i16::MAX;
-    let mut move_count = 0;
-
-    for m in MoveGenerator::new(b) {
-        move_count += 1;
-        let new_board = b.make_move(m);
-        let rec_val = alphabeta_max(tafl_ai, &new_board, depth - 1, nnodes, alpha, beta);
+    let moves: Vec<Move> = MoveGenerator::new(b).collect();
+    if moves.is_empty() {
+        return 0;
+    }
+    for &m in moves.iter() {
+        b.make_move(m, &tafl_ai.ttable);
+        let rec_val = alphabeta_max(tafl_ai, b, depth - 1, nnodes, alpha, beta);
+        b.unmake_move(&tafl_ai.ttable);
 
         if rec_val < min_eval {
             min_eval = rec_val;
@@ -169,14 +182,11 @@ fn alphabeta_min(
         }
 
         if rec_val <= alpha {
-            tafl_ai.ttable.store(b, min_eval, depth as usize);
+            tafl_ai.ttable.store(b, min_eval, depth);
             return rec_val;
         }
     }
 
-    if move_count == 0 {
-        return 0;
-    }
-    tafl_ai.ttable.store(b, min_eval, depth as usize);
+    tafl_ai.ttable.store(b, min_eval, depth);
     return min_eval;
 }
