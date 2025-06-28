@@ -1,52 +1,53 @@
 pub const BOARD_SIZE: usize = 7;
 pub const DIRS: [(isize, isize); 4] = [(0, 1), (0, -1), (1, 0), (-1, 0)];
 pub type Bitboard = u64;
+pub const EMPTY_BOARD: Bitboard = 0;
+
 use crate::ttable::{
     TranspositionTable, PIECE_TYPE_ATTACKER_IDX, PIECE_TYPE_DEFENDER_IDX, PIECE_TYPE_KING_IDX,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PieceType {
     Attacker,
     Defender,
     King,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Move {
     pub start_index: usize,
     pub end_index: usize,
     pub piece_type: PieceType,
 }
 
-#[derive(Clone, Copy)]
-pub struct MoveHistoryElement {
+#[derive(Clone, Debug)]
+struct MoveHistoryElement {
     prev_move: Move,
-    captured_piece_index: Option<usize>,
+    captured_piece_indices: [usize; 4],
+    num_captured_pieces: usize,
 }
 
 pub const NULL_MOVE: Move = Move {
     start_index: 0,
     end_index: 0,
-    piece_type: PieceType::Attacker,
+    piece_type: PieceType::Attacker, // arbitrary
 };
 
 impl Move {
     pub fn to_string(&self) -> String {
-        let mut s: String;
         let (start_row, start_col) = index_to_rc(self.start_index);
         let (end_row, end_col) = index_to_rc(self.end_index);
+        let mut s = String::with_capacity(5); // "k" + "a1" + "a1" = 5 chars max
         if self.piece_type == PieceType::King {
-            s = "k".to_string();
+            s.push('k');
         } else {
-            s = ((start_col as u8 + 'a' as u8) as char).to_string();
+            s.push((start_col as u8 + b'a') as char);
             s.push_str(&(start_row + 1).to_string());
         }
-
-        s.push((end_col as u8 + 'a' as u8) as char);
+        s.push((end_col as u8 + b'a') as char);
         s.push_str(&(end_row + 1).to_string());
-
-        return s;
+        s
     }
 }
 
@@ -64,6 +65,7 @@ impl PartialEq for Move {
     }
 }
 
+#[derive(Clone)]
 pub struct Board {
     pub attacker_board: Bitboard,
     pub defender_board: Bitboard,
@@ -74,7 +76,7 @@ pub struct Board {
     pub defender_win: bool,
     pub stalemate: bool,
     pub current_hash: usize,
-    pub history: Vec<MoveHistoryElement>,
+    history: Vec<MoveHistoryElement>,
 }
 
 pub const STARTING_BOARD: Board = Board {
@@ -90,33 +92,19 @@ pub const STARTING_BOARD: Board = Board {
     history: Vec::new(),
 };
 
-pub fn rc_to_index(row: usize, col: usize) -> usize {
+#[inline]
+pub const fn rc_to_index(row: usize, col: usize) -> usize {
     row * BOARD_SIZE + col
 }
 
-pub fn index_to_rc(index: usize) -> (usize, usize) {
+#[inline]
+pub const fn index_to_rc(index: usize) -> (usize, usize) {
     (index / BOARD_SIZE, index % BOARD_SIZE)
 }
 
+#[inline]
 pub fn inbounds(row: isize, col: isize) -> bool {
     return row >= 0 && row < BOARD_SIZE as isize && col >= 0 && col < BOARD_SIZE as isize;
-}
-
-impl Clone for Board {
-    fn clone(&self) -> Self {
-        return Board {
-            attacker_board: self.attacker_board,
-            defender_board: self.defender_board,
-            king_board: self.king_board,
-            offlimits_board: self.offlimits_board,
-            attacker_move: self.attacker_move,
-            attacker_win: self.attacker_win,
-            stalemate: self.stalemate,
-            defender_win: self.defender_win,
-            current_hash: self.current_hash,
-            history: self.history.clone(),
-        };
-    }
 }
 
 impl Board {
@@ -136,171 +124,100 @@ impl Board {
                 continue;
             }
 
-            if !self.attacker_board & (1 << new_index) != 0 {
+            if self.attacker_board & (1 << new_index) == 0 {
                 return false;
             }
         }
 
-        return true;
+        true
     }
 
+    #[inline]
     pub fn king_coordinates(&self) -> (usize, usize) {
-        for i in 0..BOARD_SIZE * BOARD_SIZE {
-            if self.king_board & (1 << i) != 0 {
-                return index_to_rc(i);
-            }
-        }
-
-        return (0, 0);
+        return index_to_rc(self.king_board.trailing_zeros() as usize);
     }
 
-    pub fn get_piece_type_at_index(&self, index: usize) -> Option<PieceType> {
-        if self.attacker_board & (1u64 << index) != 0 {
-            Some(PieceType::Attacker)
-        } else if self.defender_board & (1u64 << index) != 0 {
-            Some(PieceType::Defender)
-        } else if self.king_board & (1u64 << index) != 0 {
-            Some(PieceType::King)
-        } else {
-            None
-        }
-    }
-
-    pub fn make_attacker_move(&mut self, m: Move, tt: &TranspositionTable) {
-        let mut hist_move = MoveHistoryElement {
-            prev_move: m,
-            captured_piece_index: None,
-        };
-        self.attacker_board &= !(1 << m.start_index);
-        self.attacker_board |= 1 << m.end_index;
-
-        let (king_row, king_col) = self.king_coordinates();
-        let mut next_to_king = false;
-
-        let (end_row, end_col) = index_to_rc(m.end_index);
-        for dir in DIRS.iter() {
-            let new_row = end_row as isize + dir.0;
-            let new_col = end_col as isize + dir.1;
-            if inbounds(new_row, new_col)
-                && new_row == king_row as isize
-                && new_col == king_col as isize
-            {
-                next_to_king = true;
-                break;
-            }
-        }
-
-        if self.king_captured() && next_to_king {
-            self.attacker_win = true;
-        }
-
-        // check for captures
-        for dir in DIRS.iter() {
-            let new_row = end_row as isize + dir.0;
-            let new_col = end_col as isize + dir.1;
-            if valid_capture(
-                &self.attacker_board,
-                &self.defender_board,
-                (end_row as isize, end_col as isize),
-                (new_row, new_col),
-            ) {
-                let captured_index = rc_to_index(new_row as usize, new_col as usize);
-                self.defender_board &= !(1 << captured_index);
-                self.current_hash ^= tt.init_hash[captured_index as usize][PIECE_TYPE_DEFENDER_IDX];
-                hist_move.captured_piece_index = Some(captured_index);
-            }
-        }
-
-        // update hash
-        self.current_hash ^= tt.init_hash[m.start_index as usize][PIECE_TYPE_ATTACKER_IDX];
-        self.current_hash ^= tt.init_hash[m.end_index as usize][PIECE_TYPE_ATTACKER_IDX];
-        self.history.push(hist_move);
-    }
-
-    fn make_defender_move(&mut self, m: Move, tt: &TranspositionTable) {
-        let mut hist_move = MoveHistoryElement {
-            prev_move: m,
-            captured_piece_index: None,
-        };
-        self.defender_board &= !(1 << m.start_index);
-        self.defender_board |= 1 << m.end_index;
-
-        let capturer_bitboard = &self.defender_board | &self.king_board;
-
-        let (end_row, end_col) = index_to_rc(m.start_index);
-
-        for dir in DIRS.iter() {
-            let new_row = end_row as isize + dir.0;
-            let new_col = end_col as isize + dir.1;
-            if valid_capture(
-                &capturer_bitboard,
-                &self.attacker_board,
-                (end_row as isize, end_col as isize),
-                (new_row, new_col),
-            ) {
-                let captured_index = rc_to_index(new_row as usize, new_col as usize);
-                self.attacker_board &= !(1 << captured_index);
-                self.current_hash ^= tt.init_hash[captured_index as usize][PIECE_TYPE_ATTACKER_IDX];
-                hist_move.captured_piece_index = Some(captured_index);
-            }
-        }
-
-        // update hash
-        self.current_hash ^= tt.attacker_bits;
-        self.current_hash ^= tt.init_hash[m.start_index as usize][PIECE_TYPE_DEFENDER_IDX];
-        self.current_hash ^= tt.init_hash[m.end_index as usize][PIECE_TYPE_DEFENDER_IDX];
-        self.history.push(hist_move);
-    }
-
-    fn make_king_move(&mut self, m: Move, tt: &TranspositionTable) {
-        let mut hist_move = MoveHistoryElement {
-            prev_move: m,
-            captured_piece_index: None,
-        };
-        self.king_board &= !(1 << m.start_index);
-        self.king_board |= 1 << m.end_index;
-
-        let (end_row, end_col) = index_to_rc(m.end_index);
-
-        if (end_col == 0 && end_row == 0)
-            || (end_col == BOARD_SIZE - 1 && end_row == 0)
-            || (end_col == BOARD_SIZE - 1 && end_row == BOARD_SIZE - 1)
-            || (end_col == 0 && end_row == BOARD_SIZE - 1)
-        {
-            self.defender_win = true;
-        }
-
-        let capturer_bitboard = &self.defender_board | &self.king_board;
-
-        for dir in DIRS.iter() {
-            let new_row = end_row as isize + dir.0;
-            let new_col = end_col as isize + dir.1;
-            if valid_capture(
-                &capturer_bitboard,
-                &self.attacker_board,
-                (end_row as isize, end_col as isize),
-                (new_row, new_col),
-            ) {
-                let captured_index = rc_to_index(new_row as usize, new_col as usize);
-                self.attacker_board &= !(1 << captured_index);
-                self.current_hash ^= tt.init_hash[captured_index as usize][PIECE_TYPE_ATTACKER_IDX];
-                hist_move.captured_piece_index = Some(captured_index);
-            }
-        }
-
-        self.current_hash ^= tt.attacker_bits;
-        self.current_hash ^= tt.init_hash[m.start_index as usize][PIECE_TYPE_KING_IDX];
-        self.current_hash ^= tt.init_hash[m.end_index as usize][PIECE_TYPE_KING_IDX];
-        self.history.push(hist_move);
+    #[inline]
+    pub fn king_index(&self) -> usize {
+        return self.king_board.trailing_zeros() as usize;
     }
 
     pub fn make_move(&mut self, m: Move, tt: &TranspositionTable) {
+        let mut hist_move = MoveHistoryElement {
+            prev_move: m,
+            captured_piece_indices: [0; 4],
+            num_captured_pieces: 0,
+        };
+
+        let piece_mask = 1 << m.start_index | 1 << m.end_index;
+        let capturer_board: u64;
+        let capturee_board: u64;
         match m.piece_type {
-            PieceType::Attacker => self.make_attacker_move(m, tt),
-            PieceType::Defender => self.make_defender_move(m, tt),
-            PieceType::King => self.make_king_move(m, tt),
+            PieceType::Attacker => {
+                self.attacker_board ^= piece_mask;
+                self.current_hash ^= tt.init_hash[m.end_index][PIECE_TYPE_ATTACKER_IDX];
+                self.current_hash ^= tt.init_hash[m.start_index][PIECE_TYPE_ATTACKER_IDX];
+                capturer_board = self.attacker_board;
+                capturee_board = self.defender_board;
+            }
+            PieceType::Defender => {
+                self.defender_board ^= piece_mask;
+                self.current_hash ^= tt.init_hash[m.end_index][PIECE_TYPE_DEFENDER_IDX];
+                self.current_hash ^= tt.init_hash[m.start_index][PIECE_TYPE_DEFENDER_IDX];
+                capturer_board = self.defender_board | self.king_board;
+                capturee_board = self.attacker_board;
+            }
+            PieceType::King => {
+                self.king_board ^= piece_mask;
+                self.current_hash ^= tt.init_hash[m.end_index][PIECE_TYPE_KING_IDX];
+                self.current_hash ^= tt.init_hash[m.start_index][PIECE_TYPE_KING_IDX];
+                capturer_board = self.defender_board | self.king_board;
+                capturee_board = self.attacker_board;
+            }
         }
+
+        // check for captures
+        let (end_row, end_col) = index_to_rc(m.end_index);
+        for dir in DIRS.iter() {
+            let capturee_row = end_row as isize + dir.0;
+            let capturee_col = end_col as isize + dir.1;
+            if valid_capture(
+                capturer_board,
+                capturee_board,
+                (end_row as isize, end_col as isize),
+                (capturee_row, capturee_col),
+            ) {
+                let captured_index = rc_to_index(capturee_row as usize, capturee_col as usize);
+                let captured_piece_mask = 1 << captured_index;
+                match m.piece_type {
+                    PieceType::Attacker => {
+                        self.defender_board ^= captured_piece_mask;
+                        self.current_hash ^= tt.init_hash[captured_index][PIECE_TYPE_DEFENDER_IDX]
+                    }
+                    _ => {
+                        self.attacker_board ^= captured_piece_mask;
+                        self.current_hash ^= tt.init_hash[captured_index][PIECE_TYPE_ATTACKER_IDX];
+                    }
+                }
+                hist_move.captured_piece_indices[hist_move.num_captured_pieces] = captured_index;
+                hist_move.num_captured_pieces += 1;
+            }
+        }
+
+        // check for attacker win
+        if m.piece_type == PieceType::Attacker && self.king_captured() {
+            self.attacker_win = true;
+        }
+
+        // check for defender win
+        if m.piece_type == PieceType::King {
+            self.defender_win = (end_col == 0 || end_col == BOARD_SIZE - 1)
+                && (end_row == 0 || end_row == BOARD_SIZE - 1);
+        }
+
+        self.history.push(hist_move);
         self.attacker_move = !self.attacker_move;
+        self.current_hash ^= tt.attacker_bits_seed; // toggles for attacker's turn
     }
 
     pub fn unmake_move(&mut self, tt: &TranspositionTable) {
@@ -309,38 +226,36 @@ impl Board {
             .pop()
             .expect("tried to unmake move with empty history");
         let prev_move = m.prev_move;
-        self.attacker_move = !self.attacker_move;
-        self.current_hash ^= tt.attacker_bits;
 
+        let piece_mask = 1 << prev_move.start_index | 1 << prev_move.end_index;
         match prev_move.piece_type {
             PieceType::Attacker => {
+                self.attacker_board ^= piece_mask;
                 self.current_hash ^= tt.init_hash[prev_move.end_index][PIECE_TYPE_ATTACKER_IDX];
                 self.current_hash ^= tt.init_hash[prev_move.start_index][PIECE_TYPE_ATTACKER_IDX];
-                self.attacker_board |= 1 << prev_move.start_index; // move the piece back
-                self.attacker_board ^= 1 << prev_move.end_index; // remove
             }
             PieceType::Defender => {
+                self.defender_board ^= piece_mask;
                 self.current_hash ^= tt.init_hash[prev_move.end_index][PIECE_TYPE_DEFENDER_IDX];
                 self.current_hash ^= tt.init_hash[prev_move.start_index][PIECE_TYPE_DEFENDER_IDX];
-                self.defender_board |= 1 << prev_move.start_index;
-                self.defender_board ^= 1 << prev_move.end_index;
             }
             PieceType::King => {
+                self.king_board ^= piece_mask;
                 self.current_hash ^= tt.init_hash[prev_move.end_index][PIECE_TYPE_KING_IDX];
                 self.current_hash ^= tt.init_hash[prev_move.start_index][PIECE_TYPE_KING_IDX];
-                self.king_board |= 1 << prev_move.start_index;
-                self.king_board ^= 1 << prev_move.end_index;
             }
         }
 
-        if let Some(captured_idx) = m.captured_piece_index {
+        for i in 0..m.num_captured_pieces {
+            let captured_idx = m.captured_piece_indices[i];
+            let captured_piece_mask = 1 << captured_idx;
             match prev_move.piece_type {
                 PieceType::Attacker => {
-                    self.defender_board |= 1 << captured_idx;
+                    self.defender_board |= captured_piece_mask;
                     self.current_hash ^= tt.init_hash[captured_idx][PIECE_TYPE_DEFENDER_IDX]
                 }
                 PieceType::Defender | PieceType::King => {
-                    self.attacker_board |= 1 << captured_idx;
+                    self.attacker_board |= captured_piece_mask;
                     self.current_hash ^= tt.init_hash[captured_idx][PIECE_TYPE_ATTACKER_IDX]
                 }
             }
@@ -349,6 +264,8 @@ impl Board {
         self.attacker_win = false;
         self.defender_win = false;
         self.stalemate = false;
+        self.attacker_move = !self.attacker_move;
+        self.current_hash ^= tt.attacker_bits_seed;
     }
 
     pub fn to_string(&self) -> String {
@@ -385,9 +302,10 @@ impl Board {
     }
 }
 
-fn valid_capture(
-    capturer_bitboard: &Bitboard,
-    capturee_bitboard: &Bitboard,
+#[inline(always)]
+pub fn valid_capture(
+    capturer_bitboard: Bitboard,
+    capturee_bitboard: Bitboard,
     capturer_coords: (isize, isize),
     capturee_coords: (isize, isize),
 ) -> bool {
@@ -404,8 +322,8 @@ fn valid_capture(
     }
 
     let ally_coords = (
-        2 * (capturee_coords.0 - capturer_coords.0) + capturer_coords.0,
-        2 * (capturee_coords.1 - capturer_coords.1) + capturer_coords.1,
+        2 * capturee_coords.0 - capturer_coords.0,
+        2 * capturee_coords.1 - capturer_coords.1,
     );
 
     if !inbounds(ally_coords.0, ally_coords.1) {
@@ -413,6 +331,5 @@ fn valid_capture(
     }
 
     let ally_index = rc_to_index(ally_coords.0 as usize, ally_coords.1 as usize);
-
-    return capturer_bitboard & (1 << ally_index) != 0;
+    capturer_bitboard & (1 << ally_index) != 0
 }

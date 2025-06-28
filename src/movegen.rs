@@ -1,6 +1,38 @@
 use crate::board::{
-    inbounds, index_to_rc, rc_to_index, Bitboard, Board, Move, PieceType, BOARD_SIZE, DIRS,
+    inbounds, index_to_rc, rc_to_index, valid_capture, Board, Move, PieceType, BOARD_SIZE, DIRS,
+    EMPTY_BOARD,
 };
+
+const KING_ESCAPE_SCORE: i16 = 5000;
+const MOVE_TO_KING_SCORE: i16 = 1000;
+const CAPTURE_SCORE: i16 = 1000;
+const NORMAL_MOVE_SCORE: i16 = 0;
+
+#[derive(Debug)]
+struct ScoredMove {
+    mv: Move,
+    score: i16,
+}
+
+impl Eq for ScoredMove {}
+
+impl PartialEq for ScoredMove {
+    fn eq(&self, other: &Self) -> bool {
+        self.score == other.score
+    }
+}
+
+impl PartialOrd for ScoredMove {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScoredMove {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.score.cmp(&other.score)
+    }
+}
 
 pub struct MoveGenerator {
     pub cached_moves: Vec<Move>,
@@ -8,24 +40,50 @@ pub struct MoveGenerator {
 
 impl MoveGenerator {
     pub fn new(board: &Board) -> Self {
-        let mut all_moves = Vec::new();
-        for i in 0..BOARD_SIZE * BOARD_SIZE {
-            if board.attacker_move {
-                if board.attacker_board & (1u64 << i) != 0 {
-                    all_moves.extend(gen_attacker_piece_moves(board, i));
-                }
-            } else {
-                // Defender's turn
-                if board.defender_board & (1u64 << i) != 0 {
-                    all_moves.extend(gen_defender_piece_moves(board, i));
-                }
-                if board.king_board & (1u64 << i) != 0 {
-                    all_moves.extend(gen_king_piece_moves(board, i));
-                }
+        let mut all_moves = Vec::with_capacity(32);
+        let occupied = board.attacker_board | board.defender_board | board.king_board;
+
+        if board.attacker_move {
+            let mut current_attackers = board.attacker_board;
+            while current_attackers != 0 {
+                let start_index = current_attackers.trailing_zeros() as usize;
+                gen_piece_moves(
+                    board,
+                    start_index,
+                    occupied,
+                    board.offlimits_board,
+                    PieceType::Attacker,
+                    &mut all_moves,
+                );
+                current_attackers &= !(1 << start_index);
             }
+        } else {
+            let mut current_defenders = board.defender_board;
+            while current_defenders != 0 {
+                let start_index = current_defenders.trailing_zeros() as usize;
+                gen_piece_moves(
+                    board,
+                    start_index,
+                    occupied,
+                    board.offlimits_board,
+                    PieceType::Defender,
+                    &mut all_moves,
+                );
+                current_defenders &= !(1 << start_index);
+            }
+            gen_piece_moves(
+                board,
+                board.king_index(),
+                occupied,
+                EMPTY_BOARD,
+                PieceType::King,
+                &mut all_moves,
+            );
         }
-        MoveGenerator {
-            cached_moves: all_moves,
+
+        all_moves.sort_unstable();
+        Self {
+            cached_moves: all_moves.into_iter().map(|sm| sm.mv).collect(),
         }
     }
 }
@@ -38,90 +96,84 @@ impl Iterator for MoveGenerator {
     }
 }
 
-#[derive(Debug)]
-struct RawMove {
-    from_row: usize,
-    from_col: usize,
-    to_row: usize,
-    to_col: usize,
-}
-
-fn gen_simple_adjacent_moves(
-    index: usize,
-    occupied_squares: Bitboard,
-    offlimits_squares: Bitboard,
-) -> Vec<RawMove> {
-    let mut moves = Vec::new();
-    let (row, col) = index_to_rc(index);
-
+fn gen_piece_moves(
+    board: &Board,
+    start_index: usize,
+    occupied: u64,
+    offlimits: u64,
+    piece_type: PieceType,
+    moves: &mut Vec<ScoredMove>,
+) {
+    let (start_row, start_col) = index_to_rc(start_index);
     for &(dr, dc) in DIRS.iter() {
-        let new_row = row as isize + dr;
-        let new_col = col as isize + dc;
+        let end_row = start_row as isize + dr;
+        let end_col = start_col as isize + dc;
 
-        if !inbounds(new_row, new_col) {
+        if !inbounds(end_row, end_col) {
             continue;
         }
-
-        let new_index = rc_to_index(new_row as usize, new_col as usize);
-
+        let end_index = rc_to_index(end_row as usize, end_col as usize);
         // A move is valid if the target square is not occupied and not off-limits for movement
-        if (occupied_squares & (1u64 << new_index)) == 0
-            && (offlimits_squares & (1u64 << new_index)) == 0
-        {
-            moves.push(RawMove {
-                from_row: row,
-                from_col: col,
-                to_row: new_row as usize,
-                to_col: new_col as usize,
-            });
+        if (occupied | offlimits) & (1u64 << end_index) == 0 {
+            let mv = Move {
+                start_index,
+                end_index,
+                piece_type,
+            };
+            let sm = ScoredMove {
+                mv,
+                score: score_move(board, &mv),
+            };
+            moves.push(sm);
         }
     }
-    moves
 }
 
-fn gen_attacker_piece_moves(board: &Board, index: usize) -> Vec<Move> {
-    let mut moves = Vec::new();
-    let occupied =
-        board.attacker_board | board.defender_board | board.king_board | board.offlimits_board;
-    let piece_raw_moves = gen_simple_adjacent_moves(index, occupied, board.offlimits_board);
+fn score_move(board: &Board, m: &Move) -> i16 {
+    let mut score = NORMAL_MOVE_SCORE;
+    let (end_row, end_col) = index_to_rc(board.king_index());
 
-    for m in piece_raw_moves {
-        moves.push(Move {
-            start_index: rc_to_index(m.from_row, m.from_col),
-            end_index: rc_to_index(m.to_row, m.to_col),
-            piece_type: PieceType::Attacker,
-        });
+    if m.piece_type == PieceType::King {
+        if (end_row == 0 || end_row == BOARD_SIZE - 1)
+            && (end_col == 0 || end_col == BOARD_SIZE - 1)
+        {
+            return KING_ESCAPE_SCORE;
+        }
     }
-    moves
-}
 
-fn gen_defender_piece_moves(board: &Board, index: usize) -> Vec<Move> {
-    let mut moves = Vec::new();
-    let occupied =
-        board.attacker_board | board.defender_board | board.king_board | board.offlimits_board;
-    let piece_raw_moves = gen_simple_adjacent_moves(index, occupied, board.offlimits_board);
-
-    for m in piece_raw_moves {
-        moves.push(Move {
-            start_index: rc_to_index(m.from_row, m.from_col),
-            end_index: rc_to_index(m.to_row, m.to_col),
-            piece_type: PieceType::Defender,
-        });
+    if m.piece_type == PieceType::Attacker {
+        let (king_row, king_col) = board.king_coordinates();
+        let (end_row, end_col) = index_to_rc(m.end_index);
+        if king_row.abs_diff(end_row) + king_col.abs_diff(end_col) < 2 {
+            score += MOVE_TO_KING_SCORE;
+        }
     }
-    moves
-}
 
-fn gen_king_piece_moves(board: &Board, index: usize) -> Vec<Move> {
-    let mut moves = Vec::new();
-    let occupied = board.attacker_board | board.defender_board | board.king_board;
-    let piece_raw_moves = gen_simple_adjacent_moves(index, occupied, 0);
-
-    for m in piece_raw_moves {
-        moves.push(Move {
-            start_index: rc_to_index(m.from_row, m.from_col),
-            end_index: rc_to_index(m.to_row, m.to_col),
-            piece_type: PieceType::King,
-        });
+    let capturer_board: u64;
+    let capturee_board: u64;
+    match m.piece_type {
+        PieceType::Attacker => {
+            capturer_board = board.attacker_board;
+            capturee_board = board.defender_board;
+        }
+        _ => {
+            capturer_board = board.defender_board | board.king_board;
+            capturee_board = board.attacker_board;
+        }
     }
-    moves
+
+    for dir in DIRS {
+        let capturee_row = end_row as isize + dir.0;
+        let capturee_col = end_col as isize + dir.1;
+        if valid_capture(
+            capturer_board,
+            capturee_board,
+            (end_row as isize, end_col as isize),
+            (capturee_row, capturee_col),
+        ) {
+            score += CAPTURE_SCORE;
+        }
+    }
+
+    score
 }
