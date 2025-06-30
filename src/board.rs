@@ -21,11 +21,12 @@ pub struct Move {
     pub piece_type: PieceType,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct MoveHistoryElement {
-    prev_move: Move,
-    captured_piece_indices: [usize; 4],
-    num_captured_pieces: usize,
+    attacker_board: Bitboard,
+    defender_board: Bitboard,
+    king_board: Bitboard,
+    current_hash: usize,
 }
 
 pub const NULL_MOVE: Move = Move {
@@ -143,10 +144,11 @@ impl Board {
     }
 
     pub fn make_move(&mut self, m: Move, tt: &TranspositionTable) {
-        let mut hist_move = MoveHistoryElement {
-            prev_move: m,
-            captured_piece_indices: [0; 4],
-            num_captured_pieces: 0,
+        let hist_move = MoveHistoryElement {
+            attacker_board: self.attacker_board,
+            defender_board: self.defender_board,
+            king_board: self.king_board,
+            current_hash: self.current_hash,
         };
 
         let piece_mask = 1 << m.start_index | 1 << m.end_index;
@@ -199,8 +201,6 @@ impl Board {
                         self.current_hash ^= tt.init_hash[captured_index][PIECE_TYPE_ATTACKER_IDX];
                     }
                 }
-                hist_move.captured_piece_indices[hist_move.num_captured_pieces] = captured_index;
-                hist_move.num_captured_pieces += 1;
             }
         }
 
@@ -213,6 +213,7 @@ impl Board {
         if m.piece_type == PieceType::King {
             self.defender_win = (end_col == 0 || end_col == BOARD_SIZE - 1)
                 && (end_row == 0 || end_row == BOARD_SIZE - 1);
+            // self.defender_win = end_col == 0 || end_col == BOARD_SIZE - 1 || end_row == 0 || end_row == BOARD_SIZE - 1;
         }
 
         self.history.push(hist_move);
@@ -220,52 +221,20 @@ impl Board {
         self.current_hash ^= tt.attacker_bits_seed; // toggles for attacker's turn
     }
 
-    pub fn unmake_move(&mut self, tt: &TranspositionTable) {
+    pub fn unmake_move(&mut self) {
         let m = self
             .history
             .pop()
             .expect("tried to unmake move with empty history");
-        let prev_move = m.prev_move;
-
-        let piece_mask = 1 << prev_move.start_index | 1 << prev_move.end_index;
-        match prev_move.piece_type {
-            PieceType::Attacker => {
-                self.attacker_board ^= piece_mask;
-                self.current_hash ^= tt.init_hash[prev_move.end_index][PIECE_TYPE_ATTACKER_IDX];
-                self.current_hash ^= tt.init_hash[prev_move.start_index][PIECE_TYPE_ATTACKER_IDX];
-            }
-            PieceType::Defender => {
-                self.defender_board ^= piece_mask;
-                self.current_hash ^= tt.init_hash[prev_move.end_index][PIECE_TYPE_DEFENDER_IDX];
-                self.current_hash ^= tt.init_hash[prev_move.start_index][PIECE_TYPE_DEFENDER_IDX];
-            }
-            PieceType::King => {
-                self.king_board ^= piece_mask;
-                self.current_hash ^= tt.init_hash[prev_move.end_index][PIECE_TYPE_KING_IDX];
-                self.current_hash ^= tt.init_hash[prev_move.start_index][PIECE_TYPE_KING_IDX];
-            }
-        }
-
-        for i in 0..m.num_captured_pieces {
-            let captured_idx = m.captured_piece_indices[i];
-            let captured_piece_mask = 1 << captured_idx;
-            match prev_move.piece_type {
-                PieceType::Attacker => {
-                    self.defender_board |= captured_piece_mask;
-                    self.current_hash ^= tt.init_hash[captured_idx][PIECE_TYPE_DEFENDER_IDX]
-                }
-                PieceType::Defender | PieceType::King => {
-                    self.attacker_board |= captured_piece_mask;
-                    self.current_hash ^= tt.init_hash[captured_idx][PIECE_TYPE_ATTACKER_IDX]
-                }
-            }
-        }
+        self.defender_board = m.defender_board;
+        self.attacker_board = m.attacker_board;
+        self.king_board = m.king_board;
+        self.current_hash = m.current_hash;
 
         self.attacker_win = false;
         self.defender_win = false;
         self.stalemate = false;
         self.attacker_move = !self.attacker_move;
-        self.current_hash ^= tt.attacker_bits_seed;
     }
 
     pub fn to_string(&self) -> String {

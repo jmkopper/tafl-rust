@@ -39,7 +39,7 @@ impl TaflAI {
                     i16::MAX - 1,
                     -color,
                 );
-                b.unmake_move(&self.ttable);
+                b.unmake_move();
 
                 if eval > best_eval_this_iter {
                     best_eval_this_iter = eval;
@@ -115,7 +115,7 @@ fn negamax(
     for mv in moves {
         b.make_move(mv, &tafl_ai.ttable);
         let eval = -negamax(tafl_ai, b, depth - 1, nnodes, -beta, -alpha, -color);
-        b.unmake_move(&tafl_ai.ttable);
+        b.unmake_move();
 
         value = value.max(eval);
         alpha = alpha.max(value);

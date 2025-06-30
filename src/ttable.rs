@@ -1,7 +1,7 @@
 use rand::Rng;
 
 use crate::board::{Bitboard, Board, BOARD_SIZE};
-const TTABLE_SIZE: usize = 1 << 17;
+const TTABLE_SIZE: usize = 1 << 20;
 const NUM_SQUARES: usize = BOARD_SIZE * BOARD_SIZE;
 
 #[derive(PartialEq, Clone, Copy)]
@@ -24,7 +24,7 @@ pub const PIECE_TYPE_DEFENDER_IDX: usize = 1;
 pub const PIECE_TYPE_KING_IDX: usize = 2;
 
 pub struct TranspositionTable {
-    pub table: [TranspositionTableEntry; TTABLE_SIZE],
+    pub table: Vec<TranspositionTableEntry>,
     pub init_hash: [[usize; 3]; NUM_SQUARES], // attacker: 0, defender: 1, king: 2
     pub attacker_bits_seed: usize,
     pub capacity: usize,
@@ -32,14 +32,14 @@ pub struct TranspositionTable {
 
 impl TranspositionTable {
     pub fn new() -> Self {
-        let table = [TranspositionTableEntry {
+        let init_entry = TranspositionTableEntry {
             evaluation: 0,
             depth: 0,
             key: 0,
             flag: Flag::EXACT,
-        }; TTABLE_SIZE];
+        };
         return TranspositionTable {
-            table,
+            table: vec![init_entry; TTABLE_SIZE],
             init_hash: make_init_hash(),
             attacker_bits_seed: rand::thread_rng().gen::<usize>(),
             capacity: TTABLE_SIZE,
