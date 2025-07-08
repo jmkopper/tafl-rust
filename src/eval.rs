@@ -1,5 +1,10 @@
 use crate::board::{inbounds, rc_to_index, Bitboard, Board, BOARD_SIZE, DIRS};
 
+const KING_VALUE: i16 = 100;
+const DEFENDER_VALUE: i16 = 100;
+const ATTACKER_VALUE: i16 = 100;
+
+#[inline(always)]
 fn total_board(b: Bitboard) -> i16 {
     b.count_ones() as i16
 }
@@ -40,12 +45,12 @@ pub fn naive_eval(b: &Board) -> i16 {
     }
 
     let mut attack_score = total_board(b.attacker_board);
-    let mut defender_score = total_board(b.defender_board) + 1;
+    let mut defender_score = total_board(b.defender_board);
 
     let attackers_next_to_king = attackers_next_to_king(b);
     let dist_to_corner = dist_to_corner(b);
     defender_score -= dist_to_corner;
     attack_score += attackers_next_to_king;
 
-    return attack_score - defender_score;
+    return attack_score * ATTACKER_VALUE + KING_VALUE - defender_score * DEFENDER_VALUE;
 }

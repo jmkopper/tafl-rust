@@ -65,9 +65,11 @@ impl UI for ConsoleUI {
             "Recommended Move: {}",
             benchmark.recommendation.best_move.to_string()
         );
+        let eval_normalized = benchmark.recommendation.evaluation as f64 / 100.0;
+        let sgn = if eval_normalized >= 0.0 { "+" } else { "" };
         println!(
-            "Evaluation: {} ({} nodes) ({:.2?})",
-            benchmark.recommendation.evaluation, benchmark.recommendation.nnodes, benchmark.elapsed
+            "Evaluation: {}{:.2?} ({} nodes) ({:.2?})",
+            sgn, eval_normalized, benchmark.recommendation.nnodes, benchmark.elapsed
         );
     }
 

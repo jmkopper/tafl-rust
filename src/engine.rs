@@ -3,6 +3,8 @@ use crate::eval::naive_eval;
 use crate::movegen::MoveGenerator;
 use crate::ttable::{Flag, TranspositionTable};
 
+const ASPIRATION_WINDOW: i16 = 300;
+
 pub struct TaflAI {
     pub max_depth: u8,
     pub ttable: TranspositionTable,
@@ -12,14 +14,16 @@ impl TaflAI {
     pub fn find_best_move(&mut self, b: &mut Board) -> EngineRecommendation {
         let mut nnodes = 1;
         let mut best_move = NULL_MOVE;
-        let mut best_eval = i16::MIN;
+        let mut best_eval = i16::MIN + 1;
         let color = if b.attacker_move { 1 } else { -1 };
 
         let mut root_moves = MoveGenerator::new(b).cached_moves;
-        for current_depth in 1..=self.max_depth {
+        for current_depth in 1..=self.max_depth {   
             let mut nnodes_this_iter = 0;
             let mut best_move_this_iter = NULL_MOVE;
             let mut best_eval_this_iter = i16::MIN;
+            let mut alpha = best_eval.saturating_sub(ASPIRATION_WINDOW);
+            let mut beta = best_eval.saturating_add(ASPIRATION_WINDOW);
 
             if current_depth > 1 {
                 if let Some(pos) = root_moves.iter().position(|&m| m == best_move) {
@@ -28,22 +32,32 @@ impl TaflAI {
                 }
             }
 
-            for &m in root_moves.iter() {
-                b.make_move(m, &self.ttable);
-                let eval = -negamax(
-                    self,
-                    b,
-                    current_depth - 1,
-                    &mut nnodes_this_iter,
-                    i16::MIN + 1,
-                    i16::MAX - 1,
-                    -color,
-                );
-                b.unmake_move();
+            loop {
+                for &m in root_moves.iter() {
+                    b.make_move(m, &self.ttable);
+                    let eval = -negamax(
+                        self,
+                        b,
+                        current_depth - 1,
+                        &mut nnodes_this_iter,
+                        alpha,
+                        beta,
+                        -color,
+                    );
+                    b.unmake_move();
 
-                if eval > best_eval_this_iter {
-                    best_eval_this_iter = eval;
-                    best_move_this_iter = m;
+                    if eval > best_eval_this_iter {
+                        best_eval_this_iter = eval;
+                        best_move_this_iter = m;
+                    }
+                }
+
+                if best_eval_this_iter <= alpha {
+                    alpha = i16::MIN + 1;
+                } else if best_eval_this_iter >= beta {
+                    beta = i16::MAX - 1;
+                } else {
+                    break;
                 }
             }
 

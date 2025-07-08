@@ -22,10 +22,10 @@ pub struct Move {
 }
 
 #[derive(Clone)]
-struct MoveHistoryElement {
-    attacker_board: Bitboard,
-    defender_board: Bitboard,
-    king_board: Bitboard,
+pub struct MoveHistoryElement {
+    pub attacker_board: Bitboard,
+    pub defender_board: Bitboard,
+    pub king_board: Bitboard,
     current_hash: usize,
 }
 
@@ -77,7 +77,7 @@ pub struct Board {
     pub defender_win: bool,
     pub stalemate: bool,
     pub current_hash: usize,
-    history: Vec<MoveHistoryElement>,
+    pub history: Vec<MoveHistoryElement>,
 }
 
 pub const STARTING_BOARD: Board = Board {
@@ -141,6 +141,24 @@ impl Board {
     #[inline]
     pub fn king_index(&self) -> usize {
         return self.king_board.trailing_zeros() as usize;
+    }
+
+    pub fn is_repetition(&self) -> bool {
+        if self.history.len() < 2 {
+            return false;
+        }
+        let mut i = if self.attacker_move { 1 } else { 0 };
+        while i < self.history.len() {
+            let p = &self.history[i];
+            if self.defender_board == p.defender_board
+                && self.attacker_board == p.attacker_board
+                && self.king_board == p.king_board
+            {
+                return true;
+            }
+            i += 2;
+        }
+        false
     }
 
     pub fn make_move(&mut self, m: Move, tt: &TranspositionTable) {
@@ -211,11 +229,14 @@ impl Board {
 
         // check for defender win
         if m.piece_type == PieceType::King {
-            self.defender_win = (end_col == 0 || end_col == BOARD_SIZE - 1)
-                && (end_row == 0 || end_row == BOARD_SIZE - 1);
-            // self.defender_win = end_col == 0 || end_col == BOARD_SIZE - 1 || end_row == 0 || end_row == BOARD_SIZE - 1;
+            // self.defender_win = (end_col == 0 || end_col == BOARD_SIZE - 1)
+            //     && (end_row == 0 || end_row == BOARD_SIZE - 1);
+            self.defender_win = end_col == 0 || end_col == BOARD_SIZE - 1 || end_row == 0 || end_row == BOARD_SIZE - 1;
         }
 
+        if self.is_repetition() {
+            self.stalemate = true;
+        }
         self.history.push(hist_move);
         self.attacker_move = !self.attacker_move;
         self.current_hash ^= tt.attacker_bits_seed; // toggles for attacker's turn
